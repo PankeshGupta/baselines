@@ -357,10 +357,11 @@ def configure(dir=None, format_strs=None):
     os.makedirs(dir, exist_ok=True)
 
     log_suffix = ''
-    from mpi4py import MPI
-    rank = MPI.COMM_WORLD.Get_rank()
-    if rank > 0:
-        log_suffix = "-rank%03i" % rank
+    rank = 0
+    # from mpi4py import MPI
+    # rank = MPI.COMM_WORLD.Get_rank()
+    # if rank > 0:
+    #     log_suffix = "-rank%03i" % rank
 
     if format_strs is None:
         strs, strs_mpi = os.getenv('OPENAI_LOG_FORMAT'), os.getenv('OPENAI_LOG_FORMAT_MPI')
