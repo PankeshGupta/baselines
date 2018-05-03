@@ -79,7 +79,7 @@ def conv_se(x, scope, *, nf, rf, stride, pad='VALID', init_scale=1.0, data_forma
 
     with tf.variable_scope(scope):
         x_attn = tf.nn.relu(conv(x_attn, 'se_1', nf=16, rf=1, stride=1, pad='SAME', init_scale=np.sqrt(2), data_format=data_format))
-        x_attn = tf.nn.sigmoid(conv(x_attn, 'se_2', nf=nf_out_attn, rf=1, stride=1, pad='SAME', init_scale=np.sqrt(2), data_format=data_format)
+        x_attn = tf.nn.sigmoid(conv(x_attn, 'se_2', nf=nf_out_attn, rf=1, stride=1, pad='SAME', init_scale=np.sqrt(2), data_format=data_format))
         x = x * x_attn
         return conv(x, score, nf=nf, rf=rf, stride=stride,
                     pad=pad, init_scale=init_scale,
