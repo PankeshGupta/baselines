@@ -26,18 +26,18 @@ def attn_cnn(unscaled_images, **conv_kwargs):
     activ = tf.nn.relu
     x = scaled_images
 
-    h = activ(conv(
+    x = activ(conv(
         x, 'c1', nf=32, rf=8, stride=4, init_scale=np.sqrt(2),
         **conv_kwargs))
-    x = h * conv_se(x, 'se1')
+    x = x * conv_se(x, 'se1')
 
-    h = activ(conv(
+    x = activ(conv(
         x, 'c2', nf=64, rf=4, stride=2, init_scale=np.sqrt(2), **conv_kwargs))
-    x = h * conv_se(x, 'se2')
+    x = x * conv_se(x, 'se2')
 
-    h = activ(conv(
+    x = activ(conv(
         x, 'c3', nf=64, rf=3, stride=1, init_scale=np.sqrt(2), **conv_kwargs))
-    x = h * conv_se(x, 'se3')
+    x = x * conv_se(x, 'se3')
 
     x = conv_to_fc(x)
     x = activ(fc(x, 'fc1', nh=512, init_scale=np.sqrt(2)))
@@ -185,7 +185,7 @@ class CnnAttnPolicy(object):
 
 class MlpPolicy(object):
     recurrent = False
-    
+
     def __init__(self, sess, ob_space, ac_space, nbatch, nsteps, reuse=False):  # pylint: disable=W0613
         ob_shape = (nbatch,) + ob_space.shape
         self.pdtype = make_pdtype(ac_space)
