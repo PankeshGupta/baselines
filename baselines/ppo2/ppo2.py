@@ -87,7 +87,7 @@ class Model(object):
             d = joblib.load(load_path)
             # new load function
             # @TODO: should be only this part
-            if hasattr(d, 'pd'):
+            if hasattr(d, 'ps') and hasattr(d, 'adam_ps'):
                 loaded_params = d['ps']
                 _restore(params, loaded_params)
 
