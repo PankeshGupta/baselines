@@ -8,7 +8,7 @@ def nature_cnn(unscaled_images, **conv_kwargs):
     """
     CNN from Nature paper.
     """
-    scaled_images = tf.cast(unscaled_images, tf.float32) / 255.
+    scaled_images = tf.cast(unscaled_images, tf.float32) / 127.5 - 0.5
     activ = tf.nn.elu
     h = activ(conv(
         scaled_images, 'c1', nf=32, rf=8, stride=4, init_scale=np.sqrt(2),
@@ -22,26 +22,31 @@ def nature_cnn(unscaled_images, **conv_kwargs):
 
 
 def attn_cnn(unscaled_images, **conv_kwargs):
-    """
-    CNN from Nature paper.
-    """
-    scaled_images = tf.cast(unscaled_images, tf.float32) / 255.
-    activ = tf.nn.elu
+    scaled_images = tf.cast(unscaled_images, tf.float32) / 127.5 - 0.5
+    activ = tf.nn.relu
+    x = scaled_images
+
     h = activ(conv(
-        scaled_images, 'c1', nf=32, rf=8, stride=4, init_scale=np.sqrt(2),
+        x, 'c1', nf=32, rf=8, stride=4, init_scale=np.sqrt(2),
         **conv_kwargs))
-    h = h * conv_se(h, 'se1')
-    h2 = activ(conv(
-        h, 'c2', nf=64, rf=4, stride=2, init_scale=np.sqrt(2), **conv_kwargs))
-    h2 = h2 * conv_se(h2, 'se2')
-    h3 = activ(conv(
-        h2, 'c3', nf=64, rf=3, stride=1, init_scale=np.sqrt(2), **conv_kwargs))
-    h3 = h3 * conv_se(h3, 'se3')
-    h3 = conv_to_fc(h3)
-    return activ(fc(h3, 'fc1', nh=512, init_scale=np.sqrt(2)))
+    x = h * conv_se(x, 'se1')
+
+    h = activ(conv(
+        x, 'c2', nf=64, rf=4, stride=2, init_scale=np.sqrt(2), **conv_kwargs))
+    x = h * conv_se(x, 'se2')
+
+    h = activ(conv(
+        x, 'c3', nf=64, rf=3, stride=1, init_scale=np.sqrt(2), **conv_kwargs))
+    x = h * conv_se(x, 'se3')
+
+    x = conv_to_fc(x)
+    x = activ(fc(x, 'fc1', nh=512, init_scale=np.sqrt(2)))
+    return x
 
 
 class LnLstmPolicy(object):
+    recurrent = True
+
     def __init__(self, sess, ob_space, ac_space, nbatch, nsteps, nlstm=256, reuse=False):
         nenv = nbatch // nsteps
         nh, nw, nc = ob_space.shape
@@ -79,6 +84,7 @@ class LnLstmPolicy(object):
 
 
 class LstmPolicy(object):
+    recurrent = True
 
     def __init__(self, sess, ob_space, ac_space, nbatch, nsteps, nlstm=256, reuse=False):
         nenv = nbatch // nsteps
@@ -118,6 +124,7 @@ class LstmPolicy(object):
 
 
 class CnnPolicy(object):
+    recurrent = False
 
     def __init__(self, sess, ob_space, ac_space, nbatch, nsteps, reuse=False, **conv_kwargs):  # pylint: disable=W0613
         nh, nw, nc = ob_space.shape
@@ -147,6 +154,7 @@ class CnnPolicy(object):
 
 
 class CnnAttnPolicy(object):
+    recurrent = False
 
     def __init__(self, sess, ob_space, ac_space, nbatch, nsteps, reuse=False, **conv_kwargs):  # pylint: disable=W0613
         nh, nw, nc = ob_space.shape
@@ -176,6 +184,8 @@ class CnnAttnPolicy(object):
 
 
 class MlpPolicy(object):
+    recurrent = False
+    
     def __init__(self, sess, ob_space, ac_space, nbatch, nsteps, reuse=False):  # pylint: disable=W0613
         ob_shape = (nbatch,) + ob_space.shape
         self.pdtype = make_pdtype(ac_space)

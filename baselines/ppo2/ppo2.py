@@ -69,7 +69,7 @@ class Model(object):
                 td_map
             )[:-1]
         self.loss_names = [
-            'policy_loss', 'value_loss', 'policy_entropy', 
+            'policy_loss', 'value_loss', 'policy_entropy',
             'approxkl', 'clipfrac']
 
         def save(save_path):
@@ -114,10 +114,12 @@ class Model(object):
 
 class Runner(AbstractEnvRunner):
 
-    def __init__(self, *, env, model, nsteps, gamma, lam):
+    def __init__(self, *, env, model, nsteps, gamma, lam, nmixup=-1, mixup_time=True):
         super().__init__(env=env, model=model, nsteps=nsteps)
         self.lam = lam
         self.gamma = gamma
+        self.nmixup = nmixup
+        self.mixup_time = mixup_time
 
     def run(self):
         mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs = [], [], [], [], [], []
@@ -161,6 +163,58 @@ class Runner(AbstractEnvRunner):
             mb_advs[t] = lastgaelam = delta + self.gamma * \
                 self.lam * nextnonterminal * lastgaelam
         mb_returns = mb_advs + mb_values
+
+        # mixup episodes
+        if self.nmixup > 0:
+            ne = self.env.num_envs
+            for _ in range(self.nmixup):
+                w0 = np.random.beta(5, 1, size=(
+                    self.nsteps)).astype(np.float32)
+                m0 = np.random.choice(ne, size=(self.nsteps, 2))
+                m1 = m0[:, 0]
+                m2 = m0[:, 1]
+                i1 = np.arange(self.nsteps)
+                i2 = np.arange(self.nsteps)
+                if self.mixup_time:
+                    np.random.shuffle(i1)
+                    np.random.shuffle(i2)
+                wo = w0.reshape((-1, 1, 1, 1))
+                mix_obs = np.asarray(
+                    wo * mb_obs[i1, m1] + (1 - wo) * mb_obs[i2, m2], dtype=self.obs.dtype)
+                mix_returns = w0 * mb_returns[i1,
+                                              m1] + (1 - w0) * mb_returns[i2, m2]
+                m3 = np.select([w0 > 0.5, True], [m1, m2])
+                i3 = np.select([w0 > 0.5, True], [i1, i2])
+                mix_dones = mb_dones[i3, m3]
+                mix_actions = mb_actions[i3, m3]
+                mix_values = w0 * mb_values[i1, m1] + \
+                    (1 - w0) * mb_values[i2, m2]
+                mix_neglogpacs = w0 * \
+                    mb_neglogpacs[i1, m1] + (1 - w0) * mb_neglogpacs[i2, m2]
+                # evaluate values and neglogpacs for new mixup observations
+                #mix_values = mb_values[i3, m3].copy()
+                #mix_neglogpacs = mb_neglogpacs[i3, m3].copy()
+                # TODO: build independet value and neglogp functions with apropriate batch size
+                # for t in range(0, self.nsteps, ne):
+                #    if t+ne <= self.nsteps:
+                #        mix_v, mix_p = self.model.value_and_neglogp(mix_obs[t:t+ne], mix_actions[t:t+ne])
+                #        mix_values[t:t+ne] = mix_v
+                #        mix_neglogpacs[t:t+ne] = mix_p
+                # insert the mixup episode
+                mb_obs = np.concatenate(
+                    (mb_obs, mix_obs[:, np.newaxis, :, :, :]), axis=1)
+                mb_returns = np.concatenate(
+                    (mb_returns, mix_returns[:, np.newaxis]), axis=1)
+                mb_dones = np.concatenate(
+                    (mb_dones, mix_dones[:, np.newaxis]), axis=1)
+                mb_actions = np.concatenate(
+                    (mb_actions, mix_actions[:, np.newaxis]), axis=1)
+                mb_values = np.concatenate(
+                    (mb_values, mix_values[:, np.newaxis]), axis=1)
+                mb_neglogpacs = np.concatenate(
+                    (mb_neglogpacs, mix_neglogpacs[:, np.newaxis]), axis=1)
+        # mixup episodes
+
         return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)),
                 mb_states, epinfos)
 # obs, returns, masks, actions, values, neglogpacs, states = runner.run()
@@ -181,10 +235,12 @@ def constfn(val):
 
 
 def learn(
-    *, policy, env, nsteps, total_timesteps, ent_coef, lr,
-    vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
-    log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
-    save_interval=0, load_path=None, adam_stats='none'):
+        *, policy, env, nsteps, total_timesteps, ent_coef, lr,
+        vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
+        log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
+        save_interval=0,
+        load_path=None, adam_stats='none', 
+        nmixup=-1, mixup_time=True):
 
     if isinstance(lr, float):
         lr = constfn(lr)
@@ -199,21 +255,36 @@ def learn(
     nenvs = env.num_envs
     ob_space = env.observation_space
     ac_space = env.action_space
-    nbatch = nenvs * nsteps
-    nbatch_train = nbatch // nminibatches
 
-    def make_model(): return Model(policy=policy, ob_space=ob_space, ac_space=ac_space, 
-                                   nbatch_act=nenvs, nbatch_train=nbatch_train,
-                                   nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
-                                   max_grad_norm=max_grad_norm)
+    nbatch = nenvs * nsteps
+    if policy.recurrent:
+        envsperbatch = max(nenvs // nminibatches, 1)
+        nbatch_train = envsperbatch * nsteps
+    else:
+        nbatch_train = nbatch // nminibatches
+
+    logger.info("batch size: {}".format(nbatch_train))
+
+    def make_model():
+        return Model(
+            policy=policy, ob_space=ob_space, ac_space=ac_space,
+            nbatch_act=nenvs, nbatch_train=nbatch_train,
+            nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
+            max_grad_norm=max_grad_norm)
+    
     if save_interval and logger.get_dir():
         import cloudpickle
         with open(osp.join(logger.get_dir(), 'make_model.pkl'), 'wb') as fh:
             fh.write(cloudpickle.dumps(make_model))
+    
     model = make_model()
+
     if load_path is not None:
         model.load(load_path, adam_stats)
-    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam)
+    
+    runner = Runner(
+        env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam,
+        nmixup=nmixup, mixup_time=mixup_time)
 
     epinfobuf = deque(maxlen=100)
     tfirststart = time.time()
@@ -226,11 +297,10 @@ def learn(
         frac = 1.0 - (update - 1.0) / nupdates
         lrnow = lr(frac)
         cliprangenow = cliprange(frac)
-        obs, returns, masks, actions, values, neglogpacs, states, epinfos = runner.run(
-        )  # pylint: disable=E0632
+        obs, returns, masks, actions, values, neglogpacs, states, epinfos = runner.run()  # pylint: disable=E0632
         epinfobuf.extend(epinfos)
         mblossvals = []
-        if states is None:  # nonrecurrent version
+        if not policy.recurrent:  # nonrecurrent version
             inds = np.arange(nbatch)
             for _ in range(noptepochs):
                 np.random.shuffle(inds)
@@ -242,15 +312,12 @@ def learn(
                     mblossvals.append(model.train(
                         lrnow, cliprangenow, *slices))
         else:  # recurrent version
-            assert nenvs % nminibatches == 0
-            envsperbatch = nenvs // nminibatches
             envinds = np.arange(nenvs)
             flatinds = np.arange(nenvs * nsteps).reshape(nenvs, nsteps)
-            envsperbatch = nbatch_train // nsteps
             for _ in range(noptepochs):
                 np.random.shuffle(envinds)
-                for start in range(0, nenvs, envsperbatch):
-                    end = start + envsperbatch
+                for end in range(envsperbatch, nenvs, envsperbatch):
+                    start = end - envsperbatch
                     mbenvinds = envinds[start:end]
                     mbflatinds = flatinds[mbenvinds].ravel()
                     slices = (arr[mbflatinds] for arr in (
