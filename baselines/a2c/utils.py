@@ -77,7 +77,7 @@ def fc(x, scope, nh, *, init_scale=1.0, init_bias=0.0):
         return tf.matmul(x, w)+b
 
 
-def conv_se(x, scope, *, r=4, data_format='NHWC'):
+def conv_se(x, scope, *, r=4, data_format='NHWC', activation='relu'):
     if data_format == 'NHWC':
         x_attn = tf.reduce_mean(x, [1, 2], keepdims=True)
         nf_out_attn = list(x.get_shape())[3]
@@ -88,7 +88,7 @@ def conv_se(x, scope, *, r=4, data_format='NHWC'):
         raise NotImplementedError
 
     with tf.variable_scope(scope):
-        x_attn = tf.nn.relu(conv(
+        x_attn = tf.nn.__dcit__[activation](conv(
             x_attn, 'se_1', nf=nf_out_attn // r, rf=1, stride=1,
             pad='SAME', init_scale=np.sqrt(2), data_format=data_format))
         x_attn = tf.nn.sigmoid(conv(

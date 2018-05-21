@@ -11,14 +11,20 @@ from baselines.common.runners import AbstractEnvRunner
 
 
 class Model(object):
-    def __init__(self, *, policy, ob_space, ac_space, nbatch_act, nbatch_train,
-                 nsteps, ent_coef, vf_coef, max_grad_norm):
+    def __init__(self, *, 
+            policy, policy_activation,
+            ob_space, ac_space, nbatch_act, nbatch_train,
+            nsteps, ent_coef, vf_coef, max_grad_norm):
         sess = tf.get_default_session()
 
-        act_model = policy(sess, ob_space, ac_space,
-                           nbatch_act, 1, reuse=False)
-        train_model = policy(sess, ob_space, ac_space,
-                             nbatch_train, nsteps, reuse=True)
+        act_model = policy(
+            sess, ob_space, ac_space,
+            nbatch_act, 1, reuse=False,
+            conv_activation=policy_activation)
+        train_model = policy(
+            sess, ob_space, ac_space,
+            nbatch_train, nsteps, reuse=True,
+            conv_activation=policy_activation)
 
         A = train_model.pdtype.sample_placeholder([None])
         ADV = tf.placeholder(tf.float32, [None])
@@ -235,7 +241,8 @@ def constfn(val):
 
 
 def learn(
-        *, policy, env, nsteps, total_timesteps, ent_coef, lr,
+        *, policy, policy_activation, 
+        env, nsteps, total_timesteps, ent_coef, lr,
         vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
         log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
         save_interval=0,
@@ -267,7 +274,8 @@ def learn(
 
     def make_model():
         return Model(
-            policy=policy, ob_space=ob_space, ac_space=ac_space,
+            policy=policy, policy_activation=policy_activation,
+            ob_space=ob_space, ac_space=ac_space,
             nbatch_act=nenvs, nbatch_train=nbatch_train,
             nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
             max_grad_norm=max_grad_norm)

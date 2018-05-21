@@ -9,7 +9,7 @@ def nature_cnn(unscaled_images, **conv_kwargs):
     CNN from Nature paper.
     """
     scaled_images = tf.cast(unscaled_images, tf.float32) / 127.5 - 0.5
-    activ = tf.nn.elu
+    activ = tf.nn.__dict__[conv_kwargs.get("conv_activation", "elu")]
     h = activ(conv(
         scaled_images, 'c1', nf=32, rf=8, stride=4, init_scale=np.sqrt(2),
         **conv_kwargs))
@@ -23,21 +23,24 @@ def nature_cnn(unscaled_images, **conv_kwargs):
 
 def attn_cnn(unscaled_images, **conv_kwargs):
     scaled_images = tf.cast(unscaled_images, tf.float32) / 127.5 - 0.5
-    activ = tf.nn.relu
+    activations = conv_kwargs.get("conv_activation", "elu,relu")  # such wow, such ugly
+    activations = activations.split(",")
+    activ = activations[0]
+    se_activ = activations[1]
     x = scaled_images
 
     x = activ(conv(
         x, 'c1', nf=32, rf=8, stride=4, init_scale=np.sqrt(2),
         **conv_kwargs))
-    x = x * conv_se(x, 'se1')
+    x = x * conv_se(x, 'se1', activation=se_activ)
 
     x = activ(conv(
         x, 'c2', nf=64, rf=4, stride=2, init_scale=np.sqrt(2), **conv_kwargs))
-    x = x * conv_se(x, 'se2')
+    x = x * conv_se(x, 'se2', activation=se_activ)
 
     x = activ(conv(
         x, 'c3', nf=64, rf=3, stride=1, init_scale=np.sqrt(2), **conv_kwargs))
-    x = x * conv_se(x, 'se3')
+    x = x * conv_se(x, 'se3',  activation=se_activ)
 
     x = conv_to_fc(x)
     x = activ(fc(x, 'fc1', nh=512, init_scale=np.sqrt(2)))
